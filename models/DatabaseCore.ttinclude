@@ -1,0 +1,431 @@
+﻿																														 <#@ Assembly Name="System.Core.dll" #>
+<#@ Assembly Name="System.Windows.Forms.dll" #>
+<#@ import namespace="System" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Diagnostics" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Collections" #>
+<#@ import namespace="System.Collections.Generic" #> 
+<#+ 
+	string connectionString =  "write your connectionstring here";
+		
+	public class FormatTools
+	{
+		public static string FormatVariableDeclaration(string variableName)
+		{
+			return variableName + " " + FormatVariableName(variableName);
+		}
+		
+		public static string FormatVariableName(string variableName)
+		{
+			return variableName[0].ToString().ToLower() + variableName.Substring(1, variableName.Length - 1);
+		}
+		
+		public static string RemoveDefaultNamespaceFromVariableType(string type)
+		{
+			return type.Replace("System.", "");
+		}
+		
+		public static string FormatInputVariablesFromKeys(IEnumerable<SchemaColumn> keys)
+		{
+			StringBuilder sb = new StringBuilder();
+			
+			for (int i = 0; i < keys.Count(); i++)
+			{
+				sb.Append(RemoveDefaultNamespaceFromVariableType(keys.ElementAt(i).DataType.ToString()));
+				sb.Append(" ");
+				sb.Append(FormatVariableName(keys.ElementAt(i).VariableName));
+				
+				if (i + 1 < keys.Count())
+				{
+					sb.Append(", ");
+				}
+			}
+			
+			return sb.ToString();
+		}
+		
+	
+		public static string FormatParametersFromKeys(IEnumerable<SchemaColumn> keys, string optionalObjectName)
+		{
+			StringBuilder sb = new StringBuilder();
+			
+			sb.Append("new {");
+			
+			for (int i = 0; i < keys.Count(); i++)
+			{
+				sb.Append(keys.ElementAt(i).ColumnName);
+				sb.Append(" = ");
+				
+				if (string.IsNullOrEmpty(optionalObjectName) == false)
+				{
+					sb.Append(FormatVariableName(optionalObjectName));
+					sb.Append(".");
+					sb.Append(keys.ElementAt(i).VariableName);
+				}
+				else
+				{
+					sb.Append(FormatVariableName(keys.ElementAt(i).VariableName));
+				}
+
+				
+				
+				if (i + 1 < keys.Count())
+				{
+					sb.Append(", ");
+				}
+			}
+			
+			sb.Append("}");
+			
+			return sb.ToString();
+		}
+		
+	}
+	
+	public class SqlTools
+	{
+		public static void GetWhereClause(IEnumerable<SchemaColumn> keys, StringBuilder sb)
+		{
+			if (keys.Count() > 0)
+			{
+				sb.Append(" WHERE ");
+				for (int i = 0; i < keys.Count(); i++)
+				{
+					sb.Append(keys.ElementAt(i).ColumnName);
+					sb.Append(" = @");
+					sb.Append(keys.ElementAt(i).ColumnName);
+					
+					if (i + 1 < keys.Count())
+					{
+						sb.Append(" AND ");
+					}
+				}
+			}
+		}
+	}
+	
+    public class SchemaTable
+    {
+        public SchemaTable()
+        {
+            Columns = new List<SchemaColumn>();
+        }
+		
+		public IEnumerable<SchemaColumn> GetKeyColumns()
+        {
+            return Columns.Where(c => c.IsKey == true);
+        }
+		
+		public IEnumerable<SchemaColumn> GetIdentityColumns()
+        {
+            return Columns.Where(c => c.IsIdentity == true);
+        }
+		
+		public IEnumerable<SchemaColumn> GetAllButKeyColumns()
+        {
+            return Columns.Where(c => c.IsKey == false);
+        }
+		
+		public IEnumerable<SchemaColumn> GetAllButIdentityColumns()
+        {
+            return Columns.Where(c => c.IsIdentity == false);
+        }
+		
+		public IEnumerable<SchemaColumn> GetAllKeysButNotIdentityColumns()
+        {
+            return Columns.Where(c => c.IsKey == true && c.IsIdentity == false);
+        }
+
+        public string TableName { get; set; }
+        public string ClassName { get; set; } 
+        public List<SchemaColumn> Columns { get; set; }
+    }
+	
+	public class SchemaColumn
+    {
+        public string ColumnName { get; set; }
+		public string VariableName { get; set; }
+        public bool IsKey { get; set; }
+        public bool IsIdentity { get; set; }
+        public Type DataType { get; set; }
+        public bool IsNullable { get; set; }
+        public int CharacterMaximumLength { get; set; }
+        public int OrdinalPosition { get; set; }
+    }
+	
+	public class DatabaseSchemaAdapter
+    {
+        /// <summary>   Gets a schema. </summary>
+        ///
+        /// <remarks>   Nsl, 10.05.2012. </remarks>
+        ///
+        /// <param name="connectionString"> The connection string. </param>
+        ///
+        /// <returns>   The schema. </returns>
+
+        public static List<SchemaTable> GetSchema(string connectionString)
+        {
+            List<SchemaTable> tableList = new List<SchemaTable>();
+
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+                string[] restrictions = new string[4];
+                restrictions[1] = "dbo";
+                restrictions[3] = "BASE TABLE";
+                DataTable tables = connection.GetSchema("Tables", restrictions);
+                DataTable columns = connection.GetSchema("Columns");
+                DataTable keyInfo = GetKeyInfo(connection);
+
+                foreach (DataRow tableRow in tables.Rows)
+                {
+                    foreach (DataColumn tableColumn in tables.Columns)
+                    {
+                        if (tableColumn.ColumnName == "TABLE_NAME")
+                        {
+                            SchemaTable currentTable = new SchemaTable();
+
+                            SetTableNames(currentTable, tableRow[tableColumn].ToString());
+
+                            DataRow[] columnRows = columns.Select("TABLE_NAME = '" + currentTable.TableName + "'" , "ORDINAL_POSITION ASC");
+                           
+                            foreach (DataRow columnRow in columnRows)
+                            {
+                                SchemaColumn currentColumn = new SchemaColumn();
+
+                                SetColumnNames(currentColumn, columnRow, currentTable.TableName);
+
+                                currentColumn.DataType = GetClrTypeFromSqlType(columnRow);
+                                currentColumn.IsNullable = GetIsNullable(columnRow);
+                                currentColumn.CharacterMaximumLength = GetCharacterMaximumLength(columnRow);
+                                currentColumn.OrdinalPosition = GetOrdinalPosition(columnRow);
+                                SetKeyProperties(currentColumn, keyInfo, currentTable.TableName);
+
+                                currentTable.Columns.Add(currentColumn);
+                            }
+							
+							// dtproperties is not a usertable, moron
+							if (currentTable.ClassName.ToLower() != "dtproperties")
+							{
+								tableList.Add(currentTable);
+							}
+                            
+                        }
+                    }
+
+                }
+            }
+
+            return tableList;
+        }
+
+        /// <summary>   Gets a key information. </summary>
+        ///
+        /// <remarks>   Nsl, 14.05.2012. </remarks>
+        ///
+        /// <param name="connection">   The connection. </param>
+        ///
+        /// <returns>   The key information. </returns>
+
+        public static DataTable GetKeyInfo(SqlConnection connection)
+        {
+            string sql = "SELECT c.COLUMN_NAME, c.TABLE_NAME, COLUMNPROPERTY(OBJECT_ID(c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') AS IsIdentity " +
+                         "FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS p INNER JOIN " +
+                         "INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS kcu ON p.CONSTRAINT_TYPE = 'PRIMARY KEY' AND kcu.TABLE_CATALOG = p.TABLE_CATALOG AND " + 
+                         "kcu.TABLE_SCHEMA = p.TABLE_SCHEMA AND kcu.TABLE_NAME = p.TABLE_NAME AND kcu.CONSTRAINT_NAME = p.CONSTRAINT_NAME INNER JOIN " +
+                         "information_schema.columns AS c ON c.TABLE_CATALOG = p.TABLE_CATALOG AND c.TABLE_SCHEMA = p.TABLE_SCHEMA AND " +
+                         "c.TABLE_NAME = p.TABLE_NAME AND c.column_name = kcu.COLUMN_NAME ORDER BY kcu.TABLE_NAME";
+
+            DataTable table = new DataTable();
+
+            SqlDataAdapter dataAdapter = new SqlDataAdapter(sql, connection);
+            dataAdapter.Fill(table);
+
+            return table;
+
+        }
+
+        /// <summary>  Ensures that classes can not use protected names. </summary>
+        ///
+        /// <remarks>   Nsl, 15.05.2012. </remarks>
+        ///
+        /// <param name="table">    The table. </param>
+        /// <param name="name">     The name. </param>
+
+        public static void SetTableNames(SchemaTable table, string name)
+        {
+            table.TableName = name;
+
+            /*if (name.ToLower() == "class")
+            {
+                table.ClassName = "Klass";
+            }
+            else
+            {*/
+                table.ClassName = name;
+            /*}*/
+        }
+
+        /// <summary>   Ensures that classes can not use protected names. </summary>
+        ///
+        /// <remarks>   Nsl, 15.05.2012. </remarks>
+        ///
+        /// <param name="table">    The table. </param>
+        /// <param name="name">     The name. </param>
+
+        public static void SetColumnNames(SchemaColumn column, DataRow row, string tableName)
+        {
+            column.ColumnName = row["COLUMN_NAME"].ToString();
+
+            if (column.ColumnName.ToLower() == "word" && tableName.ToLower() == "word")
+            {
+                column.VariableName = "WordRef";
+            }
+            else if (column.ColumnName.ToLower() == "accesslevel" && tableName.ToLower() == "accesslevel")
+            {
+                column.VariableName = "AccessLevelId";
+            }
+            else
+            {
+                column.VariableName = column.ColumnName;
+            }
+        }
+
+
+        /// <summary>   Gets the is key. </summary>
+        ///
+        /// <remarks>   Nsl, 10.05.2012. </remarks>
+        ///
+        /// <param name="indexColumns"> The index columns. </param>
+        /// <param name="tableName">    Name of the table. </param>
+        /// <param name="columnName">   Name of the column. </param>
+        ///
+        /// <returns>   true if it succeeds, false if it fails. </returns>
+
+        public static void SetKeyProperties(SchemaColumn column, DataTable keyInfo, string tableName)
+        {
+            DataRow[] rows = keyInfo.Select("TABLE_NAME = '" + tableName + "' AND COLUMN_NAME = '" + column.ColumnName + "'");
+
+            if (rows.Length == 1)
+            {
+                DataRow row = rows[0];
+
+                column.IsKey = true;
+                column.IsIdentity = row["IsIdentity"].ToString() == "1" ? true : false;
+            }
+        }
+
+        /// <summary>   Gets the is nullable. </summary>
+        ///
+        /// <remarks>   Nsl, 10.05.2012. </remarks>
+        ///
+        /// <param name="columnRow">    The is nullable. </param>
+        ///
+        /// <returns>   true if it succeeds, false if it fails. </returns>
+
+        public static bool GetIsNullable(DataRow columnRow)
+        {
+            string isNullable = columnRow["IS_NULLABLE"].ToString();
+
+            if (isNullable.ToLower().Trim() == "no")
+            {
+                Console.Out.WriteLine("h");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>   Gets a colour type from sql type. </summary>
+        ///
+        /// <remarks>   Nsl, 10.05.2012. </remarks>
+        ///
+        /// <param name="columnRow">    Name of the type. </param>
+        ///
+        /// <returns>   The colour type from sql type. </returns>
+
+        public static Type GetClrTypeFromSqlType(DataRow columnRow)
+        {
+            string sqlType = columnRow["DATA_TYPE"].ToString();
+            
+            Type clrType;
+
+            switch (sqlType.ToLower())
+            {
+                case "bigint": clrType = typeof(Int64); break;
+                case "binary": clrType = typeof(Byte[]); break;
+                case "bit": clrType = typeof(Boolean); break;
+                case "char": clrType = typeof(string); break;
+                case "date": clrType = typeof(DateTime); break;
+                case "datetime": clrType = typeof(DateTime); break;
+                case "datetimeoffset": clrType = typeof(DateTimeOffset); break;
+                case "decimal": clrType = typeof(Decimal); break;
+                case "float": clrType = typeof(Double); break;
+                case "image": clrType = typeof(Byte[]); break;
+                case "int": clrType = typeof(Int32); break;
+                case "money": clrType = typeof(Decimal); break;
+                case "nchar": clrType = typeof(string); break;
+                case "ntext": clrType = typeof(string); break;
+                case "numeric": clrType = typeof(Decimal); break;
+                case "nvarchar": clrType = typeof(string); break;
+                case "real": clrType = typeof(Single); break;
+                case "rowversion": clrType = typeof(Byte[]); break;
+                case "smalldatetime": clrType = typeof(DateTime); break;
+                case "smallint": clrType = typeof(Int16); break;
+                case "smallmoney": clrType = typeof(Decimal); break;
+                case "time": clrType = typeof(TimeSpan); break;
+                case "timestamp": clrType = typeof(DateTime); break;
+                case "tinyint": clrType = typeof(Byte); break;
+                case "uniqueidentifier": clrType = typeof(Guid); break;
+                case "varbinary": clrType = typeof(Byte[]); break;
+                case "varchar": clrType = typeof(string); break;
+                case "xml": clrType = typeof(string); break;
+                default: clrType = typeof(string); break;
+            }
+
+            return clrType;
+        }
+
+        /// <summary>   Gets a character maximum length. </summary>
+        ///
+        /// <remarks>   Nsl, 10.05.2012. </remarks>
+        ///
+        /// <param name="columnRow">    The is nullable. </param>
+        ///
+        /// <returns>   The character maximum length. </returns>
+
+        public static int GetCharacterMaximumLength(DataRow columnRow)
+        {
+            string MaximumLength = columnRow["CHARACTER_MAXIMUM_LENGTH"].ToString();
+
+            int Result = 0;
+
+            if (Int32.TryParse(MaximumLength, out Result) == true)
+                return Result;
+
+            return 0;
+        }
+
+        /// <summary>   Gets an ordinal position. </summary>
+        ///
+        /// <remarks>   Nsl, 10.05.2012. </remarks>
+        ///
+        /// <param name="columnRow">    The is nullable. </param>
+        ///
+        /// <returns>   The ordinal position. </returns>
+
+        public static int GetOrdinalPosition(DataRow columnRow)
+        {
+            string MaximumLength = columnRow["ORDINAL_POSITION"].ToString();
+
+            int Result = 0;
+
+            if (Int32.TryParse(MaximumLength, out Result) == true)
+                return Result;
+
+            return 0;
+        }
+    }
+#>

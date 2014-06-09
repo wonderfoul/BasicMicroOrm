@@ -2,3 +2,4 @@ D:\Programming\Repos\BasicMicroORM\bin\Debug\BasicMicroORM.dll
 D:\Programming\Repos\BasicMicroORM\bin\Debug\BasicMicroORM.pdb
 D:\Programming\Repos\BasicMicroORM\obj\Debug\BasicMicroORM.dll
 D:\Programming\Repos\BasicMicroORM\obj\Debug\BasicMicroORM.pdb
+D:\Programming\Repos\BasicMicroOrm\obj\Debug\BasicMicroOrm.csprojResolveAssemblyReference.cache

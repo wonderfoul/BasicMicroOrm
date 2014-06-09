@@ -45,13 +45,28 @@
     <Compile Include="CrudCache.cs" />
     <Compile Include="DatabaseAttributes.cs" />
     <Compile Include="DatabaseContext.cs" />
+    <Compile Include="models\Poco.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Poco.tt</DependentUpon>
+    </Compile>
     <Compile Include="MultiQueryResultSet.cs" />
     <Compile Include="OrmCache.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ListExtensions.cs" />
   </ItemGroup>
+  <ItemGroup />
   <ItemGroup>
-    <Folder Include="models\" />
+    <None Include="models\DatabaseCore.ttinclude" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="models\Poco.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Poco.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
